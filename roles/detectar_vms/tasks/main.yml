@@ -1,0 +1,16 @@
+- name: Copiar script para o destino
+  copy:
+    src: detectar_novas_vms.py
+    dest: /tmp/detectar_novas_vms.py
+    mode: "0755"
+
+- name: Executar script Python para detectar novas VMs
+  command: python3 /tmp/detectar_novas_vms.py
+  environment:
+    VCENTER_HOST: "{{ vcenter_host }}"
+    VCENTER_USER: "{{ vcenter_user }}"
+    VCENTER_PASSWORD: "{{ vcenter_password }}"
+    DATACENTER_NAME: "{{ datacenter_name }}"
+    VM_OUTPUT_DIR: "vm_data"
+    VM_STATE_FILE: "vms_atuais.json"
+    VM_LOG_FILE: "novas_vms_detectadas.json"

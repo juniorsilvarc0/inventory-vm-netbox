@@ -1,0 +1,231 @@
+- name: Verificar se JSON da VM {{ vm_name }} existe
+  stat:
+    path: "{{ playbook_dir }}/vm_data/{{ vm_name | lower | replace('_', '-') }}.json"
+  register: json_stat
+
+- name: Pular VM se JSON não existir
+  meta: end_host
+  when: not json_stat.stat.exists
+
+- name: Ler dados do JSON da VM {{ vm_name }}
+  slurp:
+    src: "{{ playbook_dir }}/vm_data/{{ vm_name | lower | replace('_', '-') }}.json"
+  register: vm_json_raw
+
+- name: Decodificar JSON da VM
+  set_fact:
+    vm_meta: "{{ vm_json_raw.content | b64decode | from_json }}"
+
+- name: Criar site no NetBox (se necessário)
+  netbox.netbox.netbox_site:
+    netbox_url: "{{ netbox_url }}"
+    netbox_token: "{{ netbox_token }}"
+    data:
+      name: "{{ vm_meta.datacenter }}"
+      slug: "{{ vm_meta.datacenter | lower | replace(' ', '-') }}"
+    state: present
+
+- name: Criar tipo de cluster (se necessário)
+  netbox.netbox.netbox_cluster_type:
+    netbox_url: "{{ netbox_url }}"
+    netbox_token: "{{ netbox_token }}"
+    data:
+      name: VMware
+      slug: vmware
+    state: present
+
+- name: Garantir cluster existente
+  uri:
+    url: "{{ netbox_url }}/api/virtualization/clusters/?name={{ vm_meta.cluster | urlencode }}"
+    headers:
+      Authorization: "Token {{ netbox_token }}"
+    method: GET
+    return_content: yes
+    validate_certs: false
+  register: cluster_check
+
+- name: Criar cluster se não existir
+  when: cluster_check.json.count | int == 0
+  netbox.netbox.netbox_cluster:
+    netbox_url: "{{ netbox_url }}"
+    netbox_token: "{{ netbox_token }}"
+    data:
+      name: "{{ vm_meta.cluster }}"
+      site: "{{ vm_meta.datacenter }}"
+      cluster_type: VMware
+    state: present
+
+- name: Criar/atualizar VM
+  netbox.netbox.netbox_virtual_machine:
+    netbox_url: "{{ netbox_url }}"
+    netbox_token: "{{ netbox_token }}"
+    data:
+      name: "{{ vm_meta.name }}"
+      vcpus: "{{ vm_meta.vcpus | int }}"
+      memory: "{{ (vm_meta.memory | float / 1024) | round(0, 'floor') | int }}"
+      disk: "{{ vm_meta.disk | float | round(0, 'floor') | int }}"
+      cluster: "{{ vm_meta.cluster }}"
+      site: "{{ vm_meta.datacenter }}"
+      status: "{{ vm_meta.status }}"
+    state: present
+
+- name: Verificar se a VM possui interfaces
+  set_fact:
+    vm_interfaces_raw: "{{ vm_meta.interfaces | default([]) }}"
+
+- name: Filtrar interfaces com IPs
+  set_fact:
+    interfaces_com_ip: >-
+      {{ vm_interfaces_raw
+         | selectattr('ipaddresses', 'defined')
+         | selectattr('ipaddresses', '!=', '')
+         | selectattr('ipaddresses', '!=', [])
+         | list }}
+
+- name: Criar/atualizar interfaces (com MAC)
+  loop: "{{ interfaces_com_ip }}"
+  loop_control:
+    loop_var: iface
+  netbox.netbox.netbox_vm_interface:
+    netbox_url: "{{ netbox_url }}"
+    netbox_token: "{{ netbox_token }}"
+    data:
+      virtual_machine: "{{ vm_meta.name }}"
+      name: "{{ iface.name }}"
+      enabled: true
+      mac_address: "{{ iface.macaddress }}"
+    state: present
+  when: interfaces_com_ip | length > 0
+
+- name: Criar IPs no IPAM
+  loop: "{{ interfaces_com_ip | subelements('ipaddresses') }}"
+  loop_control:
+    label: "{{ item.1 }}"
+  vars:
+    ip_address: "{{ item.1 }}{{ '/128' if ':' in item.1 else '/32' }}"
+  netbox.netbox.netbox_ip_address:
+    netbox_url: "{{ netbox_url }}"
+    netbox_token: "{{ netbox_token }}"
+    data:
+      address: "{{ ip_address }}"
+      status: active
+    state: present
+  when: interfaces_com_ip | length > 0
+
+- name: Obter interfaces da VM no NetBox
+  uri:
+    url: "{{ netbox_url }}/api/virtualization/interfaces/?virtual_machine={{ vm_meta.name }}"
+    headers:
+      Authorization: "Token {{ netbox_token }}"
+    method: GET
+    return_content: yes
+    validate_certs: false
+  register: vm_interfaces
+  when: interfaces_com_ip | length > 0
+
+- name: Obter IDs de IPs existentes
+  uri:
+    url: "{{ netbox_url }}/api/ipam/ip-addresses/?address={{ item.1 }}{{ '/128' if ':' in item.1 else '/32' }}"
+    headers:
+      Authorization: "Token {{ netbox_token }}"
+    method: GET
+    return_content: yes
+    validate_certs: false
+  register: ip_query
+  loop: "{{ interfaces_com_ip | subelements('ipaddresses') }}"
+  loop_control:
+    label: "{{ item.1 }}"
+  retries: 3
+  delay: 2
+  until: ip_query.status == 200
+  when: interfaces_com_ip | length > 0
+
+- name: Obter ID da VM no NetBox
+  uri:
+    url: "{{ netbox_url }}/api/virtualization/virtual-machines/?name={{ vm_meta.name }}"
+    headers:
+      Authorization: "Token {{ netbox_token }}"
+    method: GET
+    return_content: yes
+    validate_certs: false
+  register: vm_lookup
+
+- name: Remover IPs primários da VM antes de reatribuir
+  uri:
+    url: "{{ netbox_url }}/api/virtualization/virtual-machines/{{ vm_lookup.json.results[0].id }}/"
+    method: PATCH
+    headers:
+      Authorization: "Token {{ netbox_token }}"
+      Content-Type: application/json
+    body_format: json
+    body:
+      primary_ip4: null
+      primary_ip6: null
+    status_code: [200, 204]
+  when: vm_lookup.json.results | length > 0
+  register: unset_primary_result
+
+- name: Pausar para garantir que o NetBox processe a remoção do IP primário
+  ansible.builtin.pause:
+    seconds: 2
+  when: unset_primary_result.status == 200 or unset_primary_result.status == 204
+
+- name: Montar mapeamento IP ↔ interface
+  set_fact:
+    ip_interface_map: "{{ ip_interface_map | default([]) + [ new_map ] }}"
+  vars:
+    iface_name: "{{ item.0.0.name }}"
+    ip_id: "{{ item.1.json.results[0].id }}"
+    iface_id: >-
+      {{ vm_interfaces.json.results
+         | selectattr('name', 'equalto', iface_name)
+         | map(attribute='id')
+         | first }}
+    new_map:
+      ip_id: "{{ ip_id }}"
+      iface_id: "{{ iface_id }}"
+  loop: "{{ query('subelements', interfaces_com_ip, 'ipaddresses') | zip(ip_query.results) | list }}"
+  loop_control:
+    label: "{{ item.0.1 }}"
+  when: interfaces_com_ip | length > 0
+
+- name: Associar IPs às interfaces
+  uri:
+    url: "{{ netbox_url }}/api/ipam/ip-addresses/{{ item.ip_id }}/"
+    method: PATCH
+    headers:
+      Authorization: "Token {{ netbox_token }}"
+      Content-Type: application/json
+    body_format: json
+    body:
+      assigned_object_type: virtualization.vminterface
+      assigned_object_id: "{{ item.iface_id }}"
+    status_code: [200, 204]
+  loop: "{{ ip_interface_map }}"
+  when: ip_interface_map is defined
+
+- name: Ajustar IP primário na VM
+  uri:
+    url: "{{ netbox_url }}/api/virtualization/virtual-machines/{{ vm_lookup.json.results[0].id }}/"
+    method: PATCH
+    headers:
+      Authorization: "Token {{ netbox_token }}"
+      Content-Type: application/json
+    body_format: json
+    body:
+      primary_ip4: >-
+        {{ ip_query.results
+           | map(attribute='json.results')
+           | sum(start=[])
+           | selectattr('family.value', 'equalto', 4)
+           | map(attribute='id')
+           | first | default(omit) }}
+      primary_ip6: >-
+        {{ ip_query.results
+           | map(attribute='json.results')
+           | sum(start=[])
+           | selectattr('family.value', 'equalto', 6)
+           | map(attribute='id')
+           | first | default(omit) }}
+    status_code: [200, 204]
+  when: vm_lookup.json.results | length > 0

@@ -1,0 +1,41 @@
+---
+- name: Orquestração do inventário de VMs e sincronização apenas das novas
+  hosts: localhost
+  gather_facts: false
+  vars_files:
+    - ../vars.yml
+
+  roles:
+    - detectar_vms
+
+  tasks:
+    - name: Verificar se arquivo de novas VMs foi criado
+      stat:
+        path: novas_vms_detectadas.json
+      register: novo_arquivo
+
+    - name: Ler novas VMs detectadas
+      when: novo_arquivo.stat.exists
+      slurp:
+        src: novas_vms_detectadas.json
+      register: novas_vms_raw
+
+    - name: Decodificar lista de novas VMs
+      when: novo_arquivo.stat.exists
+      set_fact:
+        novas_vms: "{{ novas_vms_raw.content | b64decode | from_json | map(attribute='nome') | list }}"
+
+    - name: Garantir variável novas_vms mesmo se vazia
+      set_fact:
+        novas_vms: "{{ novas_vms | default([]) }}"
+
+    - name: Mostrar lista de novas VMs
+      debug:
+        msg: "{{ novas_vms }}"
+
+    - name: Executar sincronização de cada nova VM
+      include_tasks: ../tasks/sync_single_vm.yml
+      loop: "{{ novas_vms }}"
+      loop_control:
+        loop_var: vm_name
+      when: novas_vms | length > 0

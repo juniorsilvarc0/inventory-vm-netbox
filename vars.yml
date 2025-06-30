@@ -1,0 +1,11 @@
+# Este arquivo contém apenas variáveis auxiliares não sensíveis.
+# As credenciais (vCenter e NetBox) devem vir de Credential Types no AWX.
+
+# Exemplo de uso em testes locais (sobrescrito no AWX)
+vcenter_host: "{{ lookup('env', 'VCENTER_HOST') }}"
+vcenter_user: "{{ lookup('env', 'VCENTER_USER') }}"
+vcenter_password: "{{ lookup('env', 'VCENTER_PASSWORD') }}"
+datacenter_name: "{{ lookup('env', 'DATACENTER_NAME') }}"
+
+netbox_url: "{{ lookup('env', 'NETBOX_URL') }}"
+netbox_token: "{{ lookup('env', 'NETBOX_TOKEN') }}"
