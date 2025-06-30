@@ -1,4 +1,4 @@
-#detectar_novas_vms.py
+import ssl
 import json
 import os
 import argparse
@@ -7,6 +7,11 @@ from pyVim.connect import SmartConnect, Disconnect
 from pyVmomi import vim
 
 # === CONFIG ===
+required_vars = ["VCENTER_HOST", "VCENTER_USER", "VCENTER_PASSWORD"]
+for var in required_vars:
+    if not os.getenv(var):
+        raise EnvironmentError(f"Variável de ambiente obrigatória não definida: {var}")
+
 VCENTER_HOST = os.environ["VCENTER_HOST"]
 VCENTER_USER = os.environ["VCENTER_USER"]
 VCENTER_PASS = os.environ["VCENTER_PASSWORD"]
