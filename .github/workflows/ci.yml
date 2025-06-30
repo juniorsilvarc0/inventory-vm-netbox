@@ -1,0 +1,31 @@
+name: CI - Lint Ansible e Python
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do repositório
+        uses: actions/checkout@v3
+
+      - name: Instalar dependências
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pip
+          pip3 install ansible ansible-lint flake8
+
+      - name: Validar YAML com Ansible Lint
+        run: |
+          ansible-lint playbooks/*.yml
+          ansible-lint tasks/*.yml
+          ansible-lint roles/**/tasks/*.yml
+
+      - name: Validar Python com Flake8
+        run: |
+          flake8 roles/**/files/*.py
+
