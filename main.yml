@@ -1,6 +1,7 @@
 ---
 - name: Orquestração do inventário de VMs e sincronização apenas das novas
   hosts: localhost
+  connection: local
   gather_facts: false
   vars_files:
     - ../vars.yml
