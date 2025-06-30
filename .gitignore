@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+*.log
+.vscode/
+.env
+.venv*/
+vm_data/
+novas_vms_detectadas.json
+vms_atuais.json
