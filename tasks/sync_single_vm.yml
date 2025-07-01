@@ -114,7 +114,7 @@
 
 - name: Obter interfaces da VM no NetBox
   uri:
-    url: "{{ netbox_url }}/api/virtualization/interfaces/?virtual_machine={{ vm_meta.name }}"
+    url: "{{ netbox_url }}/api/virtualization/interfaces/?virtual_machine={{ vm_meta.name | urlencode }}"
     headers:
       Authorization: "Token {{ netbox_token }}"
     method: GET
@@ -142,7 +142,7 @@
 
 - name: Obter ID da VM no NetBox
   uri:
-    url: "{{ netbox_url }}/api/virtualization/virtual-machines/?name={{ vm_meta.name }}"
+    url: "{{ netbox_url }}/api/virtualization/virtual-machines/?name={{ vm_meta.name | urlencode }}"
     headers:
       Authorization: "Token {{ netbox_token }}"
     method: GET
