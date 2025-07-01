@@ -238,3 +238,4 @@
       | selectattr('assigned_object.id', '!=', None)
       | list
       | length > 0
+  ignore_errors: true
