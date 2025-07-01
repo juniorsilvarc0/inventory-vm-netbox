@@ -96,6 +96,7 @@
       mac_address: "{{ iface.macaddress }}"
     state: present
   when: interfaces_com_ip | length > 0
+  ignore_errors: true
 
 - name: Criar IPs no IPAM
   loop: "{{ interfaces_com_ip | subelements('ipaddresses') }}"
@@ -111,6 +112,7 @@
       status: active
     state: present
   when: interfaces_com_ip | length > 0
+  ignore_errors: true
 
 - name: Obter interfaces da VM no NetBox
   uri:
@@ -139,6 +141,7 @@
   delay: 2
   until: ip_query.status == 200
   when: interfaces_com_ip | length > 0
+  ignore_errors: true
 
 - name: Obter ID da VM no NetBox
   uri:
@@ -164,6 +167,7 @@
     status_code: [200, 204]
   when: vm_lookup.json.results | length > 0
   register: unset_primary_result
+  ignore_errors: true
 
 - name: Pausar para garantir que o NetBox processe a remoção do IP primário
   ansible.builtin.pause:
@@ -188,6 +192,7 @@
   loop_control:
     label: "{{ item.0.1 }}"
   when: interfaces_com_ip | length > 0
+  ignore_errors: true
 
 - name: Associar IPs às interfaces
   uri:
