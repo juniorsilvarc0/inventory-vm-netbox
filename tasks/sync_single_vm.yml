@@ -228,7 +228,7 @@
            | selectattr('family.value', 'equalto', 6)
            | map(attribute='id')
            | first | default(omit) }}
-  status_code: [200, 204]
+    status_code: [200, 204]
   when:
     - vm_lookup.json.results | length > 0
     - ip_query.results
