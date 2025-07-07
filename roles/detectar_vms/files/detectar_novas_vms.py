@@ -5,19 +5,20 @@ import argparse
 from datetime import datetime
 from pyVim.connect import SmartConnect, Disconnect
 from pyVmomi import vim
-import yaml
 
 # === CONFIG ===
-with open("vars.yml", "r") as f:
-    config = yaml.safe_load(f)
+required_vars = ["VCENTER_HOST", "VCENTER_USER", "VCENTER_PASSWORD"]
+for var in required_vars:
+    if not os.getenv(var):
+        raise EnvironmentError(f"Variável de ambiente obrigatória não definida: {var}")
 
-VCENTER_HOST = config["vcenter_hostname"]
-VCENTER_USER = config["vcenter_username"]
-VCENTER_PASS = config["vcenter_password"]
-DATACENTER_NAME = config.get("datacenter_name", "Desconhecido")
-ARQUIVO_ESTADO = "vms_atuais.json"
-ARQUIVO_LOG_NOVAS = "novas_vms_detectadas.json"
-DIRETORIO_SAIDA = "vm_data"
+VCENTER_HOST = os.environ["VCENTER_HOST"]
+VCENTER_USER = os.environ["VCENTER_USER"]
+VCENTER_PASS = os.environ["VCENTER_PASSWORD"]
+DATACENTER_NAME = os.environ.get("DATACENTER_NAME", "Desconhecido")
+ARQUIVO_ESTADO = os.environ.get("VM_STATE_FILE", "vms_atuais.json")
+ARQUIVO_LOG_NOVAS = os.environ.get("VM_LOG_FILE", "novas_vms_detectadas.json")
+DIRETORIO_SAIDA = os.environ.get("VM_OUTPUT_DIR", "vm_data")
 
 os.makedirs(DIRETORIO_SAIDA, exist_ok=True)
 
@@ -135,7 +136,7 @@ def exportar_vm(vm_obj):
         json.dump(data, f, indent=2)
     print(f"[INFO] Exportado: {nome_arquivo}")
 
-# === EXPORTAR SOMENTE AS NOVAS ===
+# === EXPORTAR NOVAS VMs ===
 log = []
 if novas_vms:
     print("[INFO] Novas VMs detectadas:")
