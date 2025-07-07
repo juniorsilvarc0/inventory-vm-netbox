@@ -5,20 +5,19 @@ import argparse
 from datetime import datetime
 from pyVim.connect import SmartConnect, Disconnect
 from pyVmomi import vim
+import yaml
 
 # === CONFIG ===
-required_vars = ["VCENTER_HOST", "VCENTER_USER", "VCENTER_PASSWORD"]
-for var in required_vars:
-    if not os.getenv(var):
-        raise EnvironmentError(f"Variável de ambiente obrigatória não definida: {var}")
+with open("vars.yml", "r") as f:
+    config = yaml.safe_load(f)
 
-VCENTER_HOST = os.environ["VCENTER_HOST"]
-VCENTER_USER = os.environ["VCENTER_USER"]
-VCENTER_PASS = os.environ["VCENTER_PASSWORD"]
-DATACENTER_NAME = os.environ.get("DATACENTER_NAME", "Desconhecido")
-ARQUIVO_ESTADO = os.environ.get("VM_STATE_FILE", "vms_atuais.json")
-ARQUIVO_LOG_NOVAS = os.environ.get("VM_LOG_FILE", "novas_vms_detectadas.json")
-DIRETORIO_SAIDA = os.environ.get("VM_OUTPUT_DIR", "vm_data")
+VCENTER_HOST = config["vcenter_hostname"]
+VCENTER_USER = config["vcenter_username"]
+VCENTER_PASS = config["vcenter_password"]
+DATACENTER_NAME = config.get("datacenter_name", "Desconhecido")
+ARQUIVO_ESTADO = "vms_atuais.json"
+ARQUIVO_LOG_NOVAS = "novas_vms_detectadas.json"
+DIRETORIO_SAIDA = "vm_data"
 
 os.makedirs(DIRETORIO_SAIDA, exist_ok=True)
 
@@ -35,63 +34,56 @@ content = si.RetrieveContent()
 # === COLETAR VMs ===
 vms = content.viewManager.CreateContainerView(content.rootFolder, [vim.VirtualMachine], True).view
 vms = sorted(vms, key=lambda vm: vm.name)
-
-# === MAPEAR NOMES PARA OBJETOS ===
-vm_map = {
-    vm.name.replace("*", "").strip(): vm
-    for vm in vms
-}
-nomes_atuais = list(vm_map.keys())
+nomes_atuais = [vm.name.replace("*", "").strip() for vm in vms]
 
 # === MODO --single ===
 if args.single:
-    nome_busca = args.single.strip().lower()
-    for nome, vm in vm_map.items():
-        if nome.lower() == nome_busca:
-            def exportar_vm(vm_obj):
-                nome_vm = vm_obj.name.replace("*", "").strip()
-                summary = vm_obj.summary
-                config = vm_obj.config
-                runtime = vm_obj.runtime
-                guest = vm_obj.guest
+    vm = next((vm for vm in vms if vm.name.replace("*", "").strip().lower() == args.single.lower()), None)
+    if vm:
+        def exportar_vm(vm_obj):
+            nome_vm = vm_obj.name.replace("*", "").strip()
+            summary = vm_obj.summary
+            config = vm_obj.config
+            runtime = vm_obj.runtime
+            guest = vm_obj.guest
 
-                interfaces = []
-                if guest and hasattr(guest, "net"):
-                    for idx, dev in enumerate(guest.net):
-                        ip_list = dev.ipAddress if dev.ipAddress else []
-                        interfaces.append({
-                            "name": f"eth{idx}",
-                            "macaddress": dev.macAddress,
-                            "ipaddresses": ip_list
-                        })
+            interfaces = []
+            if guest and hasattr(guest, "net"):
+                for idx, dev in enumerate(guest.net):
+                    ip_list = dev.ipAddress if dev.ipAddress else []
+                    interfaces.append({
+                        "name": f"eth{idx}",
+                        "macaddress": dev.macAddress,
+                        "ipaddresses": ip_list
+                    })
 
-                disco_gb = sum([
-                    dev.capacityInKB for dev in config.hardware.device
-                    if isinstance(dev, vim.vm.device.VirtualDisk)
-                ]) / 1024 / 1024
+            disco_gb = sum([
+                dev.capacityInKB for dev in config.hardware.device
+                if isinstance(dev, vim.vm.device.VirtualDisk)
+            ]) / 1024 / 1024
 
-                data = {
-                    "name": nome_vm,
-                    "uuid": config.uuid,
-                    "power_state": runtime.powerState,
-                    "memory": config.hardware.memoryMB,
-                    "vcpus": config.hardware.numCPU,
-                    "disk": round(disco_gb, 2),
-                    "cluster": vm_obj.resourcePool.owner.name if vm_obj.resourcePool else "Unknown",
-                    "datacenter": DATACENTER_NAME,
-                    "folder": vm_obj.parent.name if vm_obj.parent else "",
-                    "interfaces": interfaces,
-                    "status": "active" if runtime.powerState == "poweredOn" else "offline"
-                }
+            data = {
+                "name": nome_vm,
+                "uuid": config.uuid,
+                "power_state": runtime.powerState,
+                "memory": config.hardware.memoryMB,
+                "vcpus": config.hardware.numCPU,
+                "disk": round(disco_gb, 2),
+                "cluster": vm_obj.resourcePool.owner.name if vm_obj.resourcePool else "Unknown",
+                "datacenter": DATACENTER_NAME,
+                "folder": vm_obj.parent.name if vm_obj.parent else "",
+                "interfaces": interfaces,
+                "status": "active" if runtime.powerState == "poweredOn" else "offline"
+            }
 
-                nome_arquivo = os.path.join(DIRETORIO_SAIDA, f"{nome_vm.lower().replace('_', '-').replace(' ', '-')}.json")
-                with open(nome_arquivo, "w") as f:
-                    json.dump(data, f, indent=2)
-                print(f"[INFO] Exportado: {nome_arquivo}")
+            nome_arquivo = os.path.join(DIRETORIO_SAIDA, f"{nome_vm.lower().replace('_', '-').replace(' ', '-')}.json")
+            with open(nome_arquivo, "w") as f:
+                json.dump(data, f, indent=2)
+            print(f"[INFO] Exportado: {nome_arquivo}")
 
-            exportar_vm(vm)
-            Disconnect(si)
-            exit(0)
+        exportar_vm(vm)
+    Disconnect(si)
+    exit(0)
 
 # === COMPARAÇÃO COM ESTADO ANTERIOR ===
 try:
@@ -143,7 +135,7 @@ def exportar_vm(vm_obj):
         json.dump(data, f, indent=2)
     print(f"[INFO] Exportado: {nome_arquivo}")
 
-# === EXPORTAR NOVAS VMs ===
+# === EXPORTAR SOMENTE AS NOVAS ===
 log = []
 if novas_vms:
     print("[INFO] Novas VMs detectadas:")
@@ -152,7 +144,7 @@ if novas_vms:
     for nome in novas_vms:
         print(f" - {nome}")
         log.append({"nome": nome, "detectado_em": timestamp})
-        vm_obj = vm_map.get(nome)
+        vm_obj = next((vm for vm in vms if vm.name.replace("*", "").strip() == nome), None)
         if vm_obj:
             exportar_vm(vm_obj)
 
