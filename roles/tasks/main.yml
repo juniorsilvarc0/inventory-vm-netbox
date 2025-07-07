@@ -1,0 +1,18 @@
+- name: Copiar script para o destino
+  copy:
+    src: detectar_novas_vms.py
+    dest: /tmp/detectar_novas_vms.py
+    mode: "0755"
+
+- name: Executar script Python para detectar novas VMs
+  command: python3 /tmp/detectar_novas_vms.py
+  environment:
+    VCENTER_HOST: "{{ lookup('env', 'VCENTER_HOST') }}"
+    VCENTER_USER: "{{ lookup('env', 'VCENTER_USER') }}"
+    VCENTER_PASSWORD: "{{ lookup('env', 'VCENTER_PASSWORD') }}"
+    DATACENTER_NAME: "{{ lookup('env', 'DATACENTER_NAME') }}"
+    NETBOX_URL: "{{ lookup('env', 'NETBOX_URL') }}"
+    NETBOX_TOKEN: "{{ lookup('env', 'NETBOX_TOKEN') }}"
+    VM_OUTPUT_DIR: "vm_data"
+    VM_STATE_FILE: "vms_atuais.json"
+    VM_LOG_FILE: "novas_vms_detectadas.json"
